@@ -86,6 +86,59 @@ async function dbRequest(endpoint, method = 'GET', body = null, prefer = 'return
     throw new Error('Supabase credentials are missing');
   }
 
+async function restoreParties() {
+  console.log('Loading parties from Supabase...');
+
+  const [partyRows, peopleRows, pinRows] = await Promise.all([
+    dbRequest('parties?select=*'),
+    dbRequest('party_people?select=*'),
+    dbRequest('party_pins?select=*')
+  ]);
+
+  for (const row of partyRows) {
+    const party = {
+      code: row.code,
+      name: row.name,
+      public: row.is_public,
+      people: new Map(),
+      pins: [],
+      clients: new Set(),
+      lastActive: Number(row.last_active),
+      salt: row.salt ? Buffer.from(row.salt, 'hex') : null,
+      pwHash: row.pw_hash ? Buffer.from(row.pw_hash, 'hex') : null,
+      tokens: new Set()
+    };
+
+    for (const person of peopleRows) {
+      if (person.party_code === row.code) {
+        party.people.set(person.id, {
+          id: person.id,
+          name: person.name,
+          lat: Number(person.lat),
+          lng: Number(person.lng),
+          accuracy: person.accuracy,
+          updatedAt: Number(person.updated_at)
+        });
+      }
+    }
+
+    party.pins = pinRows
+      .filter(pin => pin.party_code === row.code)
+      .map(pin => ({
+        id: pin.id,
+        name: pin.name,
+        by: pin.created_by,
+        lat: Number(pin.lat),
+        lng: Number(pin.lng),
+        createdAt: Number(pin.created_at)
+      }));
+
+    parties.set(party.code, party);
+  }
+
+  console.log(`Restored ${parties.size} parties from Supabase.`);
+}
+
   const response = await fetch(
     `${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/${endpoint}`,
     {
@@ -277,7 +330,14 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`Party Locator running on http://localhost:${PORT}`);
-  if (!MAPS_KEY) console.log('No GOOGLE_MAPS_API_KEY set: using basic embedded Google Maps fallback.');
-});
+restoreParties()
+  .then(() => {
+    server.listen(PORT, () => {
+      console.log(`Party Locator running on http://localhost:${PORT}`);
+      if (!MAPS_KEY) console.log('No GOOGLE_MAPS_API_KEY set: using basic embedded Google Maps fallback.');
+    });
+  })
+  .catch(error => {
+    console.error('Failed to restore parties from Supabase:', error);
+    process.exit(1);
+  });
