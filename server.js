@@ -341,3 +341,66 @@ restoreParties()
     console.error('Failed to restore parties from Supabase:', error);
     process.exit(1);
   });
+
+async function savePartyToDb(party) {
+  await dbRequest('parties?on_conflict=code', 'POST', {
+    code: party.code,
+    name: party.name,
+    is_public: party.public,
+    salt: party.salt ? party.salt.toString('hex') : null,
+    pw_hash: party.pwHash ? party.pwHash.toString('hex') : null,
+    created_at: party.createdAt || party.lastActive,
+    last_active: party.lastActive
+  }, 'resolution=merge-duplicates,return=minimal');
+}
+
+async function savePersonToDb(code, person) {
+  await dbRequest('party_people?on_conflict=party_code,id', 'POST', {
+    party_code: code,
+    id: person.id,
+    name: person.name,
+    lat: person.lat,
+    lng: person.lng,
+    accuracy: person.accuracy,
+    updated_at: person.updatedAt
+  }, 'resolution=merge-duplicates,return=minimal');
+}
+
+async function deletePersonFromDb(code, id) {
+  await dbRequest(
+    `party_people?party_code=eq.${encodeURIComponent(code)}&id=eq.${encodeURIComponent(id)}`,
+    'DELETE',
+    null,
+    'return=minimal'
+  );
+}
+
+async function savePinToDb(code, pin) {
+  await dbRequest('party_pins', 'POST', {
+    id: pin.id,
+    party_code: code,
+    name: pin.name,
+    created_by: pin.by,
+    lat: pin.lat,
+    lng: pin.lng,
+    created_at: pin.createdAt
+  }, 'return=minimal');
+}
+
+async function deletePinFromDb(id) {
+  await dbRequest(
+    `party_pins?id=eq.${encodeURIComponent(id)}`,
+    'DELETE',
+    null,
+    'return=minimal'
+  );
+}
+
+async function deletePartyFromDb(code) {
+  await dbRequest(
+    `parties?code=eq.${encodeURIComponent(code)}`,
+    'DELETE',
+    null,
+    'return=minimal'
+  );
+}
