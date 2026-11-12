@@ -81,59 +81,12 @@ const send = (res, status, obj) => {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(obj));
 };
+
+// Supabase REST API connection
 async function dbRequest(endpoint, method = 'GET', body = null, prefer = 'return=representation') {
   if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) {
     throw new Error('Supabase credentials are missing');
   }
-
-async function restoreParties() {
-  console.log('Loading parties from Supabase...');
-
-  const [partyRows, peopleRows, pinRows] = await Promise.all([
-    dbRequest('parties?select=*'),
-    dbRequest('party_people?select=*'),
-    dbRequest('party_pins?select=*')
-  ]);
-
-  for (const row of partyRows) {
-  
-
-    for (const person of peopleRows) {
-      if (person.party_code === row.code) {
-        party.people.set(person.id, {
-          id: person.id,
-          name: person.name,
-          lat: Number(person.lat),
-          lng: Number(person.lng),
-          accuracy: person.accuracy,
-          updatedAt: Number(person.updated_at)
-        });const party = {
-  code: newCode(), name,
-  public: !!body.public && !password,
-  people: new Map(), pins: [], clients: new Set(),
-  createdAt: Date.now(),
-  lastActive: Date.now(),
-  salt: null, pwHash: null, tokens: new Set(),
-};
-      }
-    }
-
-    party.pins = pinRows
-      .filter(pin => pin.party_code === row.code)
-      .map(pin => ({
-        id: pin.id,
-        name: pin.name,
-        by: pin.created_by,
-        lat: Number(pin.lat),
-        lng: Number(pin.lng),
-        createdAt: Number(pin.created_at)
-      }));
-
-    parties.set(party.code, party);
-  }
-
-  console.log(`Restored ${parties.size} parties from Supabase.`);
-}
 
   const response = await fetch(
     `${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/${endpoint}`,
@@ -157,6 +110,62 @@ async function restoreParties() {
   const result = await response.text();
   return result ? JSON.parse(result) : null;
 }
+
+// Restore saved parties from Supabase
+async function restoreParties() {
+  console.log('Loading parties from Supabase...');
+
+  const [partyRows, peopleRows, pinRows] = await Promise.all([
+    dbRequest('parties?select=*'),
+    dbRequest('party_people?select=*'),
+    dbRequest('party_pins?select=*')
+  ]);
+
+  for (const row of partyRows) {
+    const party = {
+      code: row.code,
+      name: row.name,
+      public: row.is_public,
+      people: new Map(),
+      pins: [],
+      clients: new Set(),
+      createdAt: Number(row.created_at),
+      lastActive: Number(row.last_active),
+      salt: row.salt ? Buffer.from(row.salt, 'hex') : null,
+      pwHash: row.pw_hash ? Buffer.from(row.pw_hash, 'hex') : null,
+      tokens: new Set()
+    };
+
+    for (const person of peopleRows) {
+      if (person.party_code === row.code) {
+        party.people.set(person.id, {
+          id: person.id,
+          name: person.name,
+          lat: Number(person.lat),
+          lng: Number(person.lng),
+          accuracy: person.accuracy,
+          updatedAt: Number(person.updated_at)
+        });
+      }
+    }
+
+    party.pins = pinRows
+      .filter(pin => pin.party_code === row.code)
+      .map(pin => ({
+        id: pin.id,
+        name: pin.name,
+        by: pin.created_by,
+        lat: Number(pin.lat),
+        lng: Number(pin.lng),
+        createdAt: Number(pin.created_at)
+      }));
+
+    parties.set(party.code, party);
+  }
+
+  console.log(`Restored ${parties.size} parties from Supabase.`);
+}
+
 // Periodic cleanup
 setInterval(() => {
   const now = Date.now();
