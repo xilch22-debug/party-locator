@@ -167,16 +167,50 @@ async function restoreParties() {
 }
 
 // Periodic cleanup
-setInterval(() => {
-  const now = Date.now();
-  for (const [k, a] of attempts) if (a.until && a.until < now) attempts.delete(k);
-  for (const [code, p] of parties) {
-    let changed = false;
-    for (const [id, person] of p.people) {
-      if (now - person.updatedAt > STALE_MS) { p.people.delete(id); changed = true; }
+let cleanupRunning = false;
+
+setInterval(async () => {
+  if (cleanupRunning) return;
+  cleanupRunning = true;
+
+  try {
+    const now = Date.now();
+
+    for (const [k, a] of attempts) {
+      if (a.until && a.until < now) attempts.delete(k);
     }
-    if (changed) broadcast(p);
-    if (now - p.lastActive > PARTY_TTL_MS && p.clients.size === 0) parties.delete(code);
+
+    for (const [code, p] of parties) {
+      let changed = false;
+
+      // Remove people who stopped sharing
+      for (const [id, person] of p.people) {
+        if (now - person.updatedAt > STALE_MS) {
+          try {
+            await deletePersonFromDb(code, id);
+            p.people.delete(id);
+            changed = true;
+          } catch (error) {
+            console.error('Failed to delete stale location:', error);
+          }
+        }
+      }
+
+      if (changed) broadcast(p);
+
+      // Delete inactive parties after 12 hours
+      if (now - p.lastActive > PARTY_TTL_MS && p.clients.size === 0) {
+        try {
+          await deletePartyFromDb(code);
+          parties.delete(code);
+          console.log(`Deleted expired party ${code}`);
+        } catch (error) {
+          console.error(`Failed to delete expired party ${code}:`, error);
+        }
+      }
+    }
+  } finally {
+    cleanupRunning = false;
   }
 }, 15000);
 
