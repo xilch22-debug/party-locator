@@ -96,18 +96,7 @@ async function restoreParties() {
   ]);
 
   for (const row of partyRows) {
-    const party = {
-      code: row.code,
-      name: row.name,
-      public: row.is_public,
-      people: new Map(),
-      pins: [],
-      clients: new Set(),
-      lastActive: Number(row.last_active),
-      salt: row.salt ? Buffer.from(row.salt, 'hex') : null,
-      pwHash: row.pw_hash ? Buffer.from(row.pw_hash, 'hex') : null,
-      tokens: new Set()
-    };
+  
 
     for (const person of peopleRows) {
       if (person.party_code === row.code) {
@@ -118,7 +107,14 @@ async function restoreParties() {
           lng: Number(person.lng),
           accuracy: person.accuracy,
           updatedAt: Number(person.updated_at)
-        });
+        });const party = {
+  code: newCode(), name,
+  public: !!body.public && !password,
+  people: new Map(), pins: [], clients: new Set(),
+  createdAt: Date.now(),
+  lastActive: Date.now(),
+  salt: null, pwHash: null, tokens: new Set(),
+};
       }
     }
 
@@ -224,6 +220,7 @@ const server = http.createServer(async (req, res) => {
         party.pwHash = hashPw(password, party.salt);
       }
       parties.set(party.code, party);
+      await savePartyToDb(party);
       return send(res, 201, snapshot(party));
     }
 
@@ -275,43 +272,63 @@ const server = http.createServer(async (req, res) => {
       if (action === 'location' && req.method === 'POST') {
         const b = await readBody(req);
         if (!validCoord(b.lat, b.lng) || !b.id) return send(res, 400, { error: 'Bad location' });
-        party.people.set(String(b.id).slice(0, 40), {
-          id: String(b.id).slice(0, 40),
-          name: clean(b.name, 30) || 'Guest',
-          lat: b.lat, lng: b.lng,
-          accuracy: typeof b.accuracy === 'number' ? Math.round(b.accuracy) : null,
-          updatedAt: Date.now(),
-        });
-        broadcast(party);
-        return send(res, 200, { ok: true });
+        const person = {
+  id: String(b.id).slice(0, 40),
+  name: clean(b.name, 30) || 'Guest',
+  lat: b.lat,
+  lng: b.lng,
+  accuracy: typeof b.accuracy === 'number' ? Math.round(b.accuracy) : null,
+  updatedAt: Date.now(),
+};
+
+party.people.set(person.id, person);
+
+await savePersonToDb(party.code, person);
+
+broadcast(party);
+return send(res, 200, { ok: true });
       }
 
       if (action === 'leave' && req.method === 'POST') {
         const b = await readBody(req);
-        party.people.delete(String(b.id));
-        broadcast(party);
-        return send(res, 200, { ok: true });
+        const personId = String(b.id);
+party.people.delete(personId);
+
+await deletePersonFromDb(party.code, personId);
+
+broadcast(party);
+return send(res, 200, { ok: true });
       }
 
       if (action === 'pin' && req.method === 'POST') {
         const b = await readBody(req);
         if (!validCoord(b.lat, b.lng)) return send(res, 400, { error: 'Bad location' });
         if (party.pins.length >= 20) return send(res, 400, { error: 'Pin limit reached' });
-        party.pins.push({
-          id: crypto.randomBytes(4).toString('hex'),
-          name: clean(b.name, 60) || 'Meetup spot',
-          by: clean(b.by, 30) || 'Guest',
-          lat: b.lat, lng: b.lng, createdAt: Date.now(),
-        });
-        broadcast(party);
-        return send(res, 201, { ok: true });
+        const pin = {
+  id: crypto.randomBytes(4).toString('hex'),
+  name: clean(b.name, 60) || 'Meetup spot',
+  by: clean(b.by, 30) || 'Guest',
+  lat: b.lat,
+  lng: b.lng,
+  createdAt: Date.now(),
+};
+
+party.pins.push(pin);
+
+await savePinToDb(party.code, pin);
+
+broadcast(party);
+return send(res, 201, { ok: true });
       }
 
       if (m[3] && req.method === 'DELETE') {
-        party.pins = party.pins.filter(x => x.id !== m[3]);
-        broadcast(party);
-        return send(res, 200, { ok: true });
-      }
+  party.pins = party.pins.filter(x => x.id !== m[3]);
+
+  await deletePinFromDb(m[3]);
+
+  broadcast(party);
+  return send(res, 200, { ok: true });
+}
 
       return send(res, 405, { error: 'Method not allowed' });
     }
