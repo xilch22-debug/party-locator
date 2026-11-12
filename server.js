@@ -7,6 +7,8 @@ const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3000;
 const MAPS_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const STALE_MS = 2 * 60 * 1000;        // drop people who stopped sharing
 const PARTY_TTL_MS = 12 * 60 * 60 * 1000;
@@ -79,7 +81,33 @@ const send = (res, status, obj) => {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(obj));
 };
+async function dbRequest(endpoint, method = 'GET', body = null, prefer = 'return=representation') {
+  if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) {
+    throw new Error('Supabase credentials are missing');
+  }
 
+  const response = await fetch(
+    `${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/${endpoint}`,
+    {
+      method,
+      headers: {
+        apikey: SUPABASE_SECRET_KEY,
+        Authorization: `Bearer ${SUPABASE_SECRET_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: prefer
+      },
+      ...(body === null ? {} : { body: JSON.stringify(body) })
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Supabase error ${response.status}: ${error}`);
+  }
+
+  const result = await response.text();
+  return result ? JSON.parse(result) : null;
+}
 // Periodic cleanup
 setInterval(() => {
   const now = Date.now();
