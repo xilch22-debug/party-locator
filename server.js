@@ -274,6 +274,13 @@ const server = http.createServer(async (req, res) => {
       const action = m[2] || '';
       party.lastActive = Date.now();
 
+dbRequest(
+  `parties?code=eq.${encodeURIComponent(party.code)}`,
+  'PATCH',
+  { last_active: party.lastActive },
+  'return=minimal'
+).catch(error => console.error('Failed to update party activity:', error));
+
       // Joining: checks the password and hands back a session token for protected parties
       if (action === 'join' && req.method === 'POST') {
         const b = await readBody(req);
